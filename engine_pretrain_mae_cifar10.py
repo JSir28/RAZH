@@ -20,7 +20,7 @@ import util.lr_sched as lr_sched
 
 def train_one_epoch(model: torch.nn.Module,
                     # criterion: torch.nn.Module,
-                    data_loader: Iterable,src_att,lab_att,
+                    data_loader: Iterable,
                     optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
                     log_writer=None,
@@ -48,11 +48,10 @@ def train_one_epoch(model: torch.nn.Module,
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         samples = samples.to(device, non_blocking=True)
-        lab_att = lab_att.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True, dtype=torch.int64)
 
         with torch.cuda.amp.autocast():
-            loss, _, _ ,_,_= model(labels,lab_att,samples, "train",mask_ratio=args.mask_ratio)
+            loss, _, _ ,_,_= model(labels,samples, "train",mask_ratio=args.mask_ratio)
 
         loss_value = loss.item()
 

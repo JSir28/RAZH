@@ -16,7 +16,7 @@ import torch.nn as nn
 
 from timm.models.vision_transformer import PatchEmbed, Block
 
-from my_loss_abl import My_Loss
+from util.my_loss import My_Loss
 from util.pos_embed import get_2d_sincos_pos_embed
 import torch.nn.functional as F
 
@@ -25,14 +25,12 @@ class MaskedAutoencoderViT(nn.Module):
     """
 
     def __init__(self, img_size=224, patch_size=16, in_chans=3,
-                 embed_dim=768, depth=24, num_heads=16, hash_length=128,
+                 embed_dim=1024, depth=24, num_heads=16, hash_length=64,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16, w2v_dim=300,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, num_classes=50, attr=None,alpha=1e-1,gamm=1e-1,
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, num_classes=50, attr=None,
                  unseen_classes=None):
         super().__init__()
 
-        self.alpha = alpha
-        self.gamm = gamm
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
@@ -162,7 +160,6 @@ class MaskedAutoencoderViT(nn.Module):
         x_placed = torch.gather(x, dim=1, index=ids_replace.unsqueeze(-1).repeat(1, 1, D))
 
         x_ = self.forward_attribute(x_placed, attr=src_att, lab_att=lab_att, labels=labels, mode=mode)
-
         x_attr = torch.cat((x_masked, x_), dim=1)
 
         # generate the binary mask: 0 is keep, 1 is remove
@@ -207,7 +204,7 @@ class MaskedAutoencoderViT(nn.Module):
         x = x + self.pos_embed[:, 1:, :]  # 加上全零的位置embedding,x直接加上0
 
         # masking: length -> length * mask_ratio
-        if mode == "train":
+        if self.training == True:
             x_masked, x_attr, mask, ids_restore = self.random_masking(x, src_att, lab_att, labels, mode, mask_ratio)
         else:
             x_attr = None
@@ -287,61 +284,53 @@ class MaskedAutoencoderViT(nn.Module):
         # attr_nor = 1.*attr/(torch.norm(attr,2,-2,keepdim=True).expand_as(attr)+1e-12)
         # 余弦相似度
         cos_attr = torch.mm(attr_nor, attr_nor.T)
-        sort_score = torch.topk(score, 1, dim=2)[1]
-        # print(sort_score)
-        # la = torch.unique(sort_score)
-        # print(la)
-        # sort_score_content = torch.topk(score, 1, dim=2)[0]
+        sort_score = torch.topk(score, 10, dim=2)[1]
+        sort_score_content = torch.topk(score, 1, dim=2)[0]
 
         attr_label = lab_att[labels]
-        # index = torch.nonzero(attr_label==1)
-        # print(index)
+
         attr_label_max = attr_label.detach().unsqueeze(dim=1).repeat(1, score.shape[1], 1)
 
-        attr_label_score = torch.mul(attr_label_max.cuda(), score.cuda())
+        attr_label_score = torch.mul(attr_label_max, score)
         label_attr_sort_score = torch.topk(attr_label_score, 1, dim=2)
 
-        # relation_score = cos_attr[label_attr_sort_score[1], sort_score]
-        #
-        # relation_score_top = torch.topk(relation_score, 6, dim=2)
-        # attr_tmp_index = relation_score_top[1]
-        # attr_index = torch.gather(sort_score, dim=2, index=attr_tmp_index)
-        # attr_index = attr_index[:,:,1:]
-        # rela = relation_score_top[0][:,:,1:]
-        # # attr_index = sort_score[attr_tmp_index]
-        #
-        # a = attr[attr_index]
-        # # attr_index = sort_score[attr_tmp_index]
-        #
-        # #        a = attr[attr_index]
-        # attr_sim = torch.sum(torch.mul(a, rela.unsqueeze(dim=3).expand_as(a)), dim=2)
+        relation_score = cos_attr[label_attr_sort_score[1], sort_score]
 
-        attr_decoder = attr[label_attr_sort_score[1].squeeze()]
-        # attr_decoder = attr[label_attr_sort_score[1].squeeze()]
+        relation_score_top = torch.topk(relation_score, 5, dim=2)
+        attr_tmp_index = relation_score_top[1]
+        attr_index = torch.gather(sort_score, dim=2, index=attr_tmp_index)
+        attr_tmp_index = relation_score_top[1]
+        attr_index = torch.gather(sort_score, dim=2, index=attr_tmp_index)
+
+        # attr_index = sort_score[attr_tmp_index]
+
+        a = attr[attr_index]
+        # attr_index = sort_score[attr_tmp_index]
+
+        #        a = attr[attr_index]
+        attr_sim = torch.sum(torch.mul(a, relation_score_top[0].unsqueeze(dim=3).expand_as(a)), dim=2)
+
+        attr_decoder = attr[label_attr_sort_score[1].squeeze()] + attr_sim
         attr_decoder = attr_decoder.to(torch.float32)
         attr_decoder = self.unalign_layer(attr_decoder)
 
-        # mask = sort_score_content<=0.01
-        # attr_decoder = torch.where(mask,x_ori.float(),attr_decoder.float())
+        mask = sort_score_content<=0.01
+        attr_decoder = torch.where(mask,x_ori.float(),attr_decoder.float())
         return attr_decoder
 
     def forward_loss(self, imgs, pred,att_pred,mask, labels, cls_out, hash_out, cls_out_attr, hash_out_attr):
         """
         imgs: [N, 3, H, W]
         pred: [N, L, p*p*3]
-        mask: [N, L], 0 is keep, 1 is remove,
+        mask: [N, L], 0 is keep, 1 is remove, 
         """
         criterion = My_Loss(self.num_classes, self.hash_length, mixup_fn=None, smoothing=0,
-                            alph=self.alpha, beta=1, gamm=1.0,unseen_class=self.unseen_classes)
+                            alph=1, beta=1e-1, gamm=1,unseen_class=self.unseen_classes)
         hash_loss, quanti_loss, cls_loss, loss1 = criterion(hash_out, cls_out,labels)
         _, _, _, loss1_attr = criterion(hash_out_attr,cls_out_attr,labels)
-        # hash1 = torch.sign(hash_out_attr)
-        # hash2 = torch.sign(hash_out)
-        # loss3 =(hash_out - hash_out_attr).pow(2).mean()
-        loss3 = torch.abs(torch.sum(hash_out_attr - hash_out)/ hash_out.shape[0])
-        # loss3_ = torch.abs(torch.sum(hash_out_attr - hash_out)).mean()
-        # loss3 = torch.abs(0.5*torch.sum(hash_out_attr - hash_out) / hash_out.shape[0])
-        # loss3=0.0
+        hash1 = torch.sign(hash_out_attr)
+        hash2 = torch.sign(hash_out)
+        loss3 = 0.1*torch.abs(0.5*torch.sum(hash1 - hash2) / hash1.shape[0])
         # loss3 = 0.1*self.dcl(hash_out,hash_out_attr,labels)
         target = self.patchify(imgs)
         if self.norm_pix_loss:
@@ -352,24 +341,19 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        loss = 0.1*(loss * mask).sum() / mask.sum()  # mean loss on removed patches
 
         loss2 = (target-att_pred) **2
         loss2 = loss2.mean(dim=-1)  # [N, L], mean loss per patch
 
-        loss2 = (loss2 * mask).sum() / mask.sum()  # mean loss on removed patches
-
-
-        rec_loss = self.gamm*(loss+loss2+loss3)
-        # loss3 = loss =loss2 =0.0
-        return rec_loss+ loss1+loss1_attr
+        loss2 = 0.1*(loss2 * mask).sum() / mask.sum()  # mean loss on removed patches
+        return loss + loss1+ loss2+loss1_attr+ loss3
 
     def forward(self,labels, lab_att,imgs, mode,mask_ratio=0.25):
         attr = self.embed_attr(self.V.float())
         latent, mask, ids_restore, cls_out, hash_out, latent_attr, cls_out_attr, hash_out_attr = self.forward_encoder(imgs, attr, lab_att, labels, mode,mask_ratio)
-        # self.unpatchify(latent)
         # latent, mask, ids_restore,cls_out, hash_out = self.forward_encoder(imgs, mask_ratio)
-        if self.training == False:
+        if mode!="train":
             return 0.0, None, mask, hash_out, cls_out
         # att_latent = self.forward_attribute(latent,lab_att,labels)
         att_pred = self.forward_decoder(latent_attr, ids_restore)
@@ -380,7 +364,7 @@ class MaskedAutoencoderViT(nn.Module):
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):
-    with open('/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/mae_jy_2_backup/word2vec/AWA2_attribute.pkl', 'rb') as f:
+    with open('D:/jy/mae_jy_2/word2vec/AWA2_attribute.pkl', 'rb') as f:
         w2v_att = torch.tensor(pickle.load(f))
     model = MaskedAutoencoderViT(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,

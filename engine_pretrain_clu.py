@@ -16,6 +16,7 @@ import torch
 
 import util.misc as misc
 import util.lr_sched as lr_sched
+from util.tools import K_means
 
 
 def train_one_epoch(model: torch.nn.Module,
@@ -38,6 +39,8 @@ def train_one_epoch(model: torch.nn.Module,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
     # attr = src_att.clone()
+
+
     for data_iter_step, samples in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
         # print(samples)
         labels = samples[1]

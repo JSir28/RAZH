@@ -162,7 +162,6 @@ class MaskedAutoencoderViT(nn.Module):
         x_placed = torch.gather(x, dim=1, index=ids_replace.unsqueeze(-1).repeat(1, 1, D))
 
         x_ = self.forward_attribute(x_placed, attr=src_att, lab_att=lab_att, labels=labels, mode=mode)
-
         x_attr = torch.cat((x_masked, x_), dim=1)
 
         # generate the binary mask: 0 is keep, 1 is remove
@@ -287,18 +286,14 @@ class MaskedAutoencoderViT(nn.Module):
         # attr_nor = 1.*attr/(torch.norm(attr,2,-2,keepdim=True).expand_as(attr)+1e-12)
         # 余弦相似度
         cos_attr = torch.mm(attr_nor, attr_nor.T)
-        sort_score = torch.topk(score, 1, dim=2)[1]
-        # print(sort_score)
-        # la = torch.unique(sort_score)
-        # print(la)
-        # sort_score_content = torch.topk(score, 1, dim=2)[0]
+        sort_score = torch.topk(score, 10, dim=2)[1]
+        sort_score_content = torch.topk(score, 1, dim=2)[0]
 
         attr_label = lab_att[labels]
-        # index = torch.nonzero(attr_label==1)
-        # print(index)
+
         attr_label_max = attr_label.detach().unsqueeze(dim=1).repeat(1, score.shape[1], 1)
 
-        attr_label_score = torch.mul(attr_label_max.cuda(), score.cuda())
+        attr_label_score = torch.mul(attr_label_max, score)
         label_attr_sort_score = torch.topk(attr_label_score, 1, dim=2)
 
         # relation_score = cos_attr[label_attr_sort_score[1], sort_score]
@@ -367,9 +362,8 @@ class MaskedAutoencoderViT(nn.Module):
     def forward(self,labels, lab_att,imgs, mode,mask_ratio=0.25):
         attr = self.embed_attr(self.V.float())
         latent, mask, ids_restore, cls_out, hash_out, latent_attr, cls_out_attr, hash_out_attr = self.forward_encoder(imgs, attr, lab_att, labels, mode,mask_ratio)
-        # self.unpatchify(latent)
         # latent, mask, ids_restore,cls_out, hash_out = self.forward_encoder(imgs, mask_ratio)
-        if self.training == False:
+        if mode!="train":
             return 0.0, None, mask, hash_out, cls_out
         # att_latent = self.forward_attribute(latent,lab_att,labels)
         att_pred = self.forward_decoder(latent_attr, ids_restore)

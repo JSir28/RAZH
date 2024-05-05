@@ -39,24 +39,24 @@ import timm.optim.optim_factory as optim_factory
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-import models_mae_cls
-from engine_pretrain import train_one_epoch
+import models_mae_mae_cifar10
+
+from engine_pretrain_mae_cifar10 import train_one_epoch
+
 device = torch.device('cuda')
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=16, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=70, type=int)
+    parser.add_argument('--epochs', default=60, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
     parser.add_argument('--hash_dir', default='./hash_dir', type=str)
-    parser.add_argument('--alpha', default=1, type=float)
-    parser.add_argument('--gamm', default=1e-1, type=float)
 
     # Model parameters
     parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
                         help='Name of mod el to train')
-    parser.add_argument('--retrain', default='./mae_pretrain_vit_base.pth', type=str,
+    parser.add_argument('--retrain', default='D:/jy/mae_jy_2/mae_pretrain_vit_base.pth', type=str,
                         help='Name of model to train')
     parser.add_argument('--hash_length', default=64,type=int,
                         help='Name of model to train')
@@ -86,19 +86,19 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/datasets/AWA2/', type=str,
+    parser.add_argument('--data_path', default='D:/jy/datasets/cifar-10/train_cifar10/', type=str,
                         help='dataset path')
     parser.add_argument('--dataset', default='awa2', type=str,
                         help='dataset')
-    parser.add_argument('--dataset_type', default='awa2', type=str,
+    parser.add_argument('--dataset_type', default='cifar10', type=str,
                         help='dataset')
     parser.add_argument('--crop_size', default='224', type=str,
                         help='dataset')
-    parser.add_argument('--classnum', default=50, type=int,
+    parser.add_argument('--classnum', default=10, type=int,
                         help='classnum')
     parser.add_argument('--TOP_K', default=[5000], type=int,
                         help='TOP_K')
-    parser.add_argument('--w2vpath', default='./word2vec/AWA2_attribute.pkl',
+    parser.add_argument('--w2vpath', default='D:/jy/mae_jy_2/word2vec/AWA2_attribute.pkl',
                         type=str,
                         help='dataset')
 
@@ -142,18 +142,6 @@ def seed_torch(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.enabled = False
 
-def get_unseenclass():
-        unseen_classes = open(
-            '/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/datasets/AWA2/Animals_with_Attributes2/testclasses.txt').readlines()
-        all_classes = open('/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/datasets/AWA2/Animals_with_Attributes2/classes.txt').readlines()
-        all_classes = [i.replace('\t', ' ').replace('\n', '').split(' ')[-1] for i in all_classes]
-        unseen_classes = [i.replace('\n', '') for i in unseen_classes]
-
-        target = [all_classes.index(i) for i in unseen_classes]
-        target = torch.tensor(target)
-        return target
-
-
 def main(args):
     misc.init_distributed_mode(args)
 
@@ -171,33 +159,38 @@ def main(args):
 
     cudnn.benchmark = True
 
-    args.log_dir = args.log_dir +"/" + str(args.mask_ratio) + "/0915/" +str(time.time())+"_"+str(args.hash_length) + "_" + str(args.dataset_type)+ "_" + str(args.alpha)+ "_" + str(args.gamm)
+    args.log_dir = args.log_dir + "/mae/" + str(args.mask_ratio) + "/" + str(args.hash_length) + "_" + str(args.dataset_type)+ "_" + str(time.time())
     if misc.get_rank() == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=args.log_dir)
     else:
         log_writer = None
 
+
+    # wind = Visdom()
+    # wind.line([0.],[0.],win="train_loss",opts=dict(title='train_loss'))
+    # wind.line([0.],[0.],win="train_epoch_loss",opts=dict(title='train_epoch_loss'))
+    # wind.line([0.],[0.],win="Map",opts=dict(title='Map'))
+    # wind.line([0.],[0.],win="lr",opts=dict(title='lr'))
     # loading w2v
     # src_att = torch.load(args.w2vpath)
     # src_att = torch.from_numpy(np.load(args.w2vpath)) #loading attribute w2v
-    with open(args.w2vpath, 'rb') as f:
-        src_att = torch.tensor(pickle.load(f))
-    src_att.to(device)
-    lab_att = read_attr(os.path.join(args.data_path, 'Animals_with_Attributes2/predicate-matrix-binary.txt')) #load class attribute
-    lab_att = [i[0].split(" ") for i in lab_att]
-    lab_att = [list(map(int,j)) for j in lab_att]
-    lab_att = torch.Tensor(lab_att)
+    # with open(args.w2vpath, 'rb') as f:
+    #     src_att = torch.tensor(pickle.load(f))
+    # src_att.to(device)
+    # lab_att = read_attr(os.path.join(args.data_path, 'Animals_with_Attributes2/predicate-matrix-binary.txt')) #load class attribute
+    # lab_att = [i[0].split(" ") for i in lab_att]
+    # lab_att = [list(map(int,j)) for j in lab_att]
+    # lab_att = torch.Tensor(lab_att)
 
 
     # data_loader_train, test_loader,database_loader, num_train, num_test, num_database = get_data(args)
     # database_loader = get_database_data(test_loader, args)
-    data_loader_train, num_train = get_train_data(args)
-    unseen = get_unseenclass()
+    data_loader_train, num_train,unseen = get_cifar10_train_data(args)
     print(num_train)
     
     # define the model
-    model = models_mae_cls.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,hash_length=args.hash_length,unseen_classes= unseen,alpha=args.alpha,gamm=args.gamm)
+    model = models_mae_mae_cifar10.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,hash_length=args.hash_length,unseen_classes=unseen)
 
     if args.retrain:
         checkpoint = torch.load(args.retrain, map_location='cpu')
@@ -260,15 +253,19 @@ def main(args):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
         print("new attr")
-        model.attr = src_att
+        # model.attr = src_att
         train_stats = train_one_epoch(
-            model, data_loader_train,src_att,lab_att,
+            model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             log_writer=log_writer,
             args=args
         )
-
-        Map = 0
+        # if args.output_dir and (epoch==20 or epoch + 1 == args.epochs):
+            # torch.save(model, "/media/yun/1CC208A37B22D4E0/jy/backup/mae_jy_2/checkpoint/checkpoint_"+str(1)+".pth")
+            # torch.save(model.state_dict(), "/media/yun/1CC208A37B22D4E0/jy/backup/mae_jy_2/checkpoint/checkpoint_param_"+str(1)+".pth")
+            # misc.save_model(
+            #     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+            #     loss_scaler=loss_scaler, epoch=epoch)
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,}
@@ -278,30 +275,29 @@ def main(args):
                 log_writer.flush()
             with open(os.path.join(args.log_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
-        if epoch%10==0 or  epoch + 1 == args.epochs or epoch>90:
-            acc1, attr_acc1,  acc5, attr_acc5, loss, Map, Precision = validata(args, data_loader_train, src_att, lab_att, model, epoch,
-                                                                   max_map, log_writer=log_writer)
+        if epoch % 100 == 0 or epoch + 1 == args.epochs:
+            acc1, attr_acc1, acc5, attr_acc5, loss, Map, Precision = validata(args, data_loader_train, model, epoch,
+                                                               max_map, log_writer=log_writer)
             max_map = max(max_map, Map)
             max_precison = max(max_precison, Precision)
             print(f'Max map:{max_map:.6f} Max Precision:{max_precison[0]:.6f}%')
-
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
 @torch.no_grad()
-def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_writer):
-    test_loader, database_loader, num_test, num_database = get_query_data(args,data_loader_train)
+def validata(args,data_loader_train, model, epoch,max_map, log_writer):
+    test_loader, database_loader, num_test, num_database = get_cifar10_query_data(args, data_loader_train)
     print("test:",num_test)
     print("database:",num_database)
     model.eval()
-    if epoch%10==0 or epoch + 1 == args.epochs or epoch > 90:
+    if epoch%100==0 or epoch + 1 == args.epochs:
         query_label_matrix = np.empty(shape=(0,))
-        query_label_matrix1 = np.empty(shape=(0,50,))
+        query_label_matrix1 = np.empty(shape=(0,10,))
         query_hash_matrix = np.empty(shape=(0, args.hash_length))
         database_label_matrix = np.empty(shape=(0,))
-        database_label_matrix1 = np.empty(shape=(0,50,))
+        database_label_matrix1 = np.empty(shape=(0,10,))
         database_hash_matrix = np.empty(shape=(0, args.hash_length))
 
     loss_meter = AverageMeter()
@@ -317,15 +313,15 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
         target = sample[1][1]
         images = images.to(device)
         target = target.to(device)
-        src_att = src_att.to(device, non_blocking=True)
-        lab_att = lab_att.to(device, non_blocking=True)
+        # src_att = src_att.to(device, non_blocking=True)
+        # lab_att = lab_att.to(device, non_blocking=True)
         with torch.no_grad():
-            loss, _, _ ,hash_out,cls_out= model(target,lab_att,images, "test",mask_ratio=args.mask_ratio)
+            loss, _, _ ,hash_out,cls_out= model(target,images, "test",mask_ratio=args.mask_ratio)
 
-        if epoch%10==0 or  epoch + 1 == args.epochs or epoch>90:
+        if epoch%100==0 or epoch + 1 == args.epochs:
             hash_code = torch.sign(hash_out)
             hash_code = hash_code.cpu().numpy()
-            one_hot_label = F.one_hot(target,50)
+            one_hot_label = F.one_hot(target,10)
             query_label_matrix = np.concatenate((query_label_matrix, target.cpu().numpy()), axis=0)
             query_label_matrix1 = np.concatenate((query_label_matrix1, one_hot_label.cpu().numpy()), axis=0)
             query_hash_matrix = np.concatenate((query_hash_matrix, hash_code), axis=0)
@@ -334,7 +330,9 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
 
         acc1_meter.update(acc1.item(), target.size(0))
         acc5_meter.update(acc5.item(), target.size(0))
-    if epoch%10==0 or epoch + 1 == args.epochs or epoch > 90:
+
+
+    if epoch%100==0 or epoch + 1 == args.epochs:
         database_acc1_meter = AverageMeter()
         database_acc5_meter = AverageMeter()
         loop = tqdm(enumerate(database_loader), total=len(database_loader))
@@ -344,13 +342,13 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
             images = images.to(device)
             target = target.to(device)
             with torch.no_grad():
-                loss, _, _ ,hash_out,cls_out= model(target,lab_att,images,"test", mask_ratio=args.mask_ratio)
+                loss, _, _ ,hash_out,cls_out= model(target,images,"test", mask_ratio=args.mask_ratio)
 
-            if epoch%10==0 or epoch + 1 == args.epochs or epoch > 90:
+            if epoch%100==0 or epoch + 1 == args.epochs:
                 hash_code = torch.sign(hash_out)
                 hash_code = hash_code.cpu().numpy()
 
-                one_hot_label = F.one_hot(target,50)
+                one_hot_label = F.one_hot(target,10)
                 database_label_matrix = np.concatenate((database_label_matrix, target.cpu().numpy()), axis=0)
                 database_label_matrix1 = np.concatenate((database_label_matrix1, one_hot_label.cpu().numpy()), axis=0)
                 database_hash_matrix = np.concatenate((database_hash_matrix, hash_code), axis=0)
@@ -370,13 +368,14 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
         if epoch + 1 == args.epochs:
             print(map_list)
             print(map_list1)
-        os.makedirs(args.hash_dir + '/hash_0708/', exist_ok=True)
-        np.savez(
-            args.hash_dir +'/hash_0708/map_' + str(Map) + '_' + str(epoch) + '_query_hash_label',
-            label=query_label_matrix, hash_code=query_hash_matrix)
-        np.savez(
-            args.hash_dir + '/hash_0708/map_' + str(Map) + '_' + str(epoch) + '_database_hash_label',
-            label=database_label_matrix, hash_code=database_hash_matrix)
+        if max_map < Map:
+            os.makedirs(args.hash_dir + '/hash_code/', exist_ok=True)
+            np.savez(
+                args.hash_dir +'/hash_code/map_' + str(Map) + '_' + str(epoch) + '_query_hash_label',
+                label=query_label_matrix, hash_code=query_hash_matrix)
+            np.savez(
+                args.hash_dir + '/hash_code/map_' + str(Map) + '_' + str(epoch) + '_database_hash_label',
+                label=database_label_matrix, hash_code=database_hash_matrix)
         log_writer.add_scalar('Map', Map, epoch)
         log_writer.add_scalar('Recall', Recall, epoch)
         log_writer.add_scalar('Presicion', presicion1[0], epoch)
@@ -387,9 +386,6 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
                      'epoch': str(epoch), 'hash_lenght': str(args.hash_length), }
         with open(os.path.join(args.log_dir, "map.txt"), mode="a", encoding="utf-8") as f:
             f.write(json.dumps(map_stats) + "\n")
-
-        # torch.save(model, "/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/mae_jy_2_backup/checkpoint/" + str(args.hash_length) + "/checkpoint_0724" + str(Map) + ".pth")
-        # torch.save(model.state_dict(), "/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/mae_jy_2_backup/checkpoint/" + str(args.hash_length) + "/checkpoint_param_0708" + str(Map) + ".pth")
         return acc1_meter.avg,attr_acc1_meter.avg, acc5_meter.avg,attr_acc5_meter.avg, loss_meter.avg, Map,presicion1
     return acc1_meter.avg, attr_acc1_meter.avg,acc5_meter.avg, attr_acc5_meter.avg,loss_meter.avg, 0.0,0.0
 

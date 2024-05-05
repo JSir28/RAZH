@@ -39,8 +39,8 @@ import timm.optim.optim_factory as optim_factory
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-import models_mae_cls
-from engine_pretrain import train_one_epoch
+import models_mae_label
+from engine_pretrain_label import train_one_epoch
 device = torch.device('cuda')
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -61,7 +61,7 @@ def get_args_parser():
     parser.add_argument('--hash_length', default=64,type=int,
                         help='Name of model to train')
     parser.set_defaults(global_pool=False)
-    parser.add_argument('--input_size', default=224, type=int,
+    parser.add_argument('--input_size', default=192, type=int,
                         help='images input size')
 
     parser.add_argument('--mask_ratio', default=0.5, type=float,
@@ -171,7 +171,7 @@ def main(args):
 
     cudnn.benchmark = True
 
-    args.log_dir = args.log_dir +"/" + str(args.mask_ratio) + "/0915/" +str(time.time())+"_"+str(args.hash_length) + "_" + str(args.dataset_type)+ "_" + str(args.alpha)+ "_" + str(args.gamm)
+    args.log_dir = args.log_dir +"/" + str(args.mask_ratio) + "/0915_patch/" +str(time.time())+"_"+str(args.hash_length) + "_" + str(args.dataset_type)+ "_" + str(args.alpha)+ "_" + str(args.gamm)
     if misc.get_rank() == 0 and args.log_dir is not None:
         os.makedirs(args.log_dir, exist_ok=True)
         log_writer = SummaryWriter(log_dir=args.log_dir)
@@ -181,13 +181,13 @@ def main(args):
     # loading w2v
     # src_att = torch.load(args.w2vpath)
     # src_att = torch.from_numpy(np.load(args.w2vpath)) #loading attribute w2v
-    with open(args.w2vpath, 'rb') as f:
-        src_att = torch.tensor(pickle.load(f))
-    src_att.to(device)
-    lab_att = read_attr(os.path.join(args.data_path, 'Animals_with_Attributes2/predicate-matrix-binary.txt')) #load class attribute
-    lab_att = [i[0].split(" ") for i in lab_att]
-    lab_att = [list(map(int,j)) for j in lab_att]
-    lab_att = torch.Tensor(lab_att)
+    # with open(args.w2vpath, 'rb') as f:
+    #     src_att = torch.tensor(pickle.load(f))
+    # src_att.to(device)
+    # lab_att = read_attr(os.path.join(args.data_path, 'Animals_with_Attributes2/predicate-matrix-binary.txt')) #load class attribute
+    # lab_att = [i[0].split(" ") for i in lab_att]
+    # lab_att = [list(map(int,j)) for j in lab_att]
+    # lab_att = torch.Tensor(lab_att)
 
 
     # data_loader_train, test_loader,database_loader, num_train, num_test, num_database = get_data(args)
@@ -197,7 +197,7 @@ def main(args):
     print(num_train)
     
     # define the model
-    model = models_mae_cls.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,hash_length=args.hash_length,unseen_classes= unseen,alpha=args.alpha,gamm=args.gamm)
+    model = models_mae_label.__dict__[args.model](norm_pix_loss=args.norm_pix_loss,hash_length=args.hash_length,unseen_classes= unseen,alpha=args.alpha,gamm=args.gamm)
 
     if args.retrain:
         checkpoint = torch.load(args.retrain, map_location='cpu')
@@ -260,9 +260,8 @@ def main(args):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
         print("new attr")
-        model.attr = src_att
         train_stats = train_one_epoch(
-            model, data_loader_train,src_att,lab_att,
+            model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             log_writer=log_writer,
             args=args
@@ -278,8 +277,8 @@ def main(args):
                 log_writer.flush()
             with open(os.path.join(args.log_dir, "log.txt"), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(log_stats) + "\n")
-        if epoch%10==0 or  epoch + 1 == args.epochs or epoch>90:
-            acc1, attr_acc1,  acc5, attr_acc5, loss, Map, Precision = validata(args, data_loader_train, src_att, lab_att, model, epoch,
+        if epoch>50 or  epoch + 1 == args.epochs or epoch>90:
+            acc1, attr_acc1,  acc5, attr_acc5, loss, Map, Precision = validata(args, data_loader_train, model, epoch,
                                                                    max_map, log_writer=log_writer)
             max_map = max(max_map, Map)
             max_precison = max(max_precison, Precision)
@@ -291,12 +290,12 @@ def main(args):
     print('Training time {}'.format(total_time_str))
 
 @torch.no_grad()
-def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_writer):
+def validata(args,data_loader_train,model, epoch,max_map, log_writer):
     test_loader, database_loader, num_test, num_database = get_query_data(args,data_loader_train)
     print("test:",num_test)
     print("database:",num_database)
     model.eval()
-    if epoch%10==0 or epoch + 1 == args.epochs or epoch > 90:
+    if epoch > 50 or epoch + 1 == args.epochs or epoch > 90:
         query_label_matrix = np.empty(shape=(0,))
         query_label_matrix1 = np.empty(shape=(0,50,))
         query_hash_matrix = np.empty(shape=(0, args.hash_length))
@@ -317,12 +316,11 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
         target = sample[1][1]
         images = images.to(device)
         target = target.to(device)
-        src_att = src_att.to(device, non_blocking=True)
-        lab_att = lab_att.to(device, non_blocking=True)
+        lab_att = target.to(device, non_blocking=True)
         with torch.no_grad():
             loss, _, _ ,hash_out,cls_out= model(target,lab_att,images, "test",mask_ratio=args.mask_ratio)
 
-        if epoch%10==0 or  epoch + 1 == args.epochs or epoch>90:
+        if epoch>50 or  epoch + 1 == args.epochs or epoch>90:
             hash_code = torch.sign(hash_out)
             hash_code = hash_code.cpu().numpy()
             one_hot_label = F.one_hot(target,50)
@@ -334,7 +332,7 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
 
         acc1_meter.update(acc1.item(), target.size(0))
         acc5_meter.update(acc5.item(), target.size(0))
-    if epoch%10==0 or epoch + 1 == args.epochs or epoch > 90:
+    if epoch > 50 or epoch + 1 == args.epochs or epoch > 90:
         database_acc1_meter = AverageMeter()
         database_acc5_meter = AverageMeter()
         loop = tqdm(enumerate(database_loader), total=len(database_loader))
@@ -343,10 +341,11 @@ def validata(args,data_loader_train, src_att,lab_att,model, epoch,max_map, log_w
             target = sample[1]
             images = images.to(device)
             target = target.to(device)
+            lab_att = target
             with torch.no_grad():
                 loss, _, _ ,hash_out,cls_out= model(target,lab_att,images,"test", mask_ratio=args.mask_ratio)
 
-            if epoch%10==0 or epoch + 1 == args.epochs or epoch > 90:
+            if epoch > 50 or epoch + 1 == args.epochs or epoch > 90:
                 hash_code = torch.sign(hash_out)
                 hash_code = hash_code.cpu().numpy()
 

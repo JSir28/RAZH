@@ -149,8 +149,29 @@ class MaskedAutoencoderViT(nn.Module):
         N, L, D = x.shape  # batch, length, dim
         len_keep = int(L * (1 - mask_ratio))
 
-        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
-
+        # noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        noise = torch.Tensor([[0.6421, 0.2290, 0.7030, 0.8824, 0.1701, 0.1881, 0.2923, 0.0719, 0.4427,
+         0.8114, 0.6871, 0.3389, 0.4379, 0.2826, 0.0964, 0.3635, 0.5345, 0.2464,
+         0.1254, 0.6461, 0.5737, 0.3445, 0.6369, 0.9621, 0.5273, 0.1573, 0.9624,
+         0.8598, 0.4523, 0.2741, 0.2890, 0.9360, 0.7612, 0.2429, 0.5200, 0.6026,
+         0.6322, 0.4717, 0.2383, 0.4846, 0.3619, 0.3321, 0.2521, 0.2576, 0.2644,
+         0.6970, 0.0773, 0.0244, 0.9277, 0.6795, 0.7765, 0.7181, 0.3093, 0.1860,
+         0.1592, 0.4684, 0.6240, 0.0316, 0.1161, 0.7814, 0.5641, 0.8298, 0.9454,
+         0.8039, 0.3937, 0.2775, 0.6415, 0.9067, 0.0206, 0.6342, 0.1146, 0.1025,
+         0.6809, 0.7543, 0.6712, 0.6454, 0.3490, 0.5121, 0.0585, 0.1739, 0.5102,
+         0.3854, 0.4223, 0.7842, 0.6877, 0.3940, 0.3354, 0.1382, 0.7573, 0.1485,
+         0.6550, 0.4091, 0.8893, 0.1810, 0.1733, 0.5577, 0.5147, 0.2849, 0.9994,
+         0.0722, 0.7710, 0.7434, 0.3846, 0.6771, 0.4160, 0.1242, 0.8309, 0.3691,
+         0.4265, 0.9899, 0.9842, 0.1278, 0.3690, 0.7831, 0.8099, 0.1348, 0.1363,
+         0.7095, 0.1586, 0.8602, 0.1173, 0.2068, 0.6949, 0.7743, 0.3242, 0.2106,
+         0.6916, 0.6611, 0.6282, 0.0390, 0.3492, 0.3166, 0.5052, 0.9480, 0.1370,
+         0.4933, 0.6918, 0.7814, 0.0048, 0.5206, 0.8940, 0.1738, 0.8110, 0.4287,
+         0.9501, 0.0703, 0.5877, 0.8629, 0.8619, 0.2500, 0.0913, 0.5110, 0.2582,
+         0.8155, 0.2406, 0.5528, 0.0625, 0.4985, 0.9384, 0.7650, 0.7114, 0.2063,
+         0.9274, 0.2507, 0.9597, 0.0870, 0.2533, 0.3478, 0.5837, 0.7718, 0.6069,
+         0.3128, 0.1018, 0.3537, 0.2632, 0.1984, 0.8102, 0.5697, 0.2313, 0.7380,
+         0.1628, 0.2060, 0.4516, 0.8281, 0.7553, 0.1626, 0.1473, 0.6681, 0.4638,
+         0.5514, 0.5142, 0.1420, 0.4156, 0.3402, 0.4135, 0.8144]])
         # sort noise for each sample
         ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
         ids_restore = torch.argsort(ids_shuffle, dim=1)
@@ -161,8 +182,8 @@ class MaskedAutoencoderViT(nn.Module):
         ids_replace = ids_shuffle[:, len_keep:]
         x_placed = torch.gather(x, dim=1, index=ids_replace.unsqueeze(-1).repeat(1, 1, D))
 
-        x_ = self.forward_attribute(x_placed, attr=src_att, lab_att=lab_att, labels=labels, mode=mode)
-
+        x_,attr_in = self.forward_attribute(x_placed, attr=src_att, lab_att=lab_att, labels=labels, mode=mode)
+        x_ = torch.unsqueeze(x_,0)
         x_attr = torch.cat((x_masked, x_), dim=1)
 
         # generate the binary mask: 0 is keep, 1 is remove
@@ -171,7 +192,7 @@ class MaskedAutoencoderViT(nn.Module):
         # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore)
 
-        return x_masked, x_attr, mask, ids_restore
+        return x_masked, x_attr, mask, ids_restore,attr_in
 
     # class AttentionPooling(nn.Module):
     #     def __init__(self, in_dim):
@@ -207,11 +228,11 @@ class MaskedAutoencoderViT(nn.Module):
         x = x + self.pos_embed[:, 1:, :]  # 加上全零的位置embedding,x直接加上0
 
         # masking: length -> length * mask_ratio
-        if mode == "train":
-            x_masked, x_attr, mask, ids_restore = self.random_masking(x, src_att, lab_att, labels, mode, mask_ratio)
-        else:
-            x_attr = None
-            x_masked = x
+        # if self.training == True:
+        x_masked, x_attr, mask, ids_restore,attr_in = self.random_masking(x, src_att, lab_att, labels, mode, mask_ratio)
+        # else:
+        #     x_attr = None
+        #     x_masked = x
 
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
@@ -243,7 +264,7 @@ class MaskedAutoencoderViT(nn.Module):
         else:
             hash_out_attr = None
             cls_out_attr = None
-        return x_masked, mask, ids_restore, cls_out, hash_out, x_attr, cls_out_attr, hash_out_attr
+        return x_masked, mask, ids_restore,attr_in, cls_out, hash_out, x_attr, cls_out_attr, hash_out_attr
 
 
     def forward_decoder(self, x, ids_restore):
@@ -287,34 +308,31 @@ class MaskedAutoencoderViT(nn.Module):
         # attr_nor = 1.*attr/(torch.norm(attr,2,-2,keepdim=True).expand_as(attr)+1e-12)
         # 余弦相似度
         cos_attr = torch.mm(attr_nor, attr_nor.T)
-        sort_score = torch.topk(score, 1, dim=2)[1]
-        # print(sort_score)
-        # la = torch.unique(sort_score)
-        # print(la)
-        # sort_score_content = torch.topk(score, 1, dim=2)[0]
+        sort_score = torch.topk(score, 10, dim=2)[1]
+        sort_score_content = torch.topk(score, 1, dim=2)[0]
 
         attr_label = lab_att[labels]
-        # index = torch.nonzero(attr_label==1)
-        # print(index)
+
         attr_label_max = attr_label.detach().unsqueeze(dim=1).repeat(1, score.shape[1], 1)
 
-        attr_label_score = torch.mul(attr_label_max.cuda(), score.cuda())
+        attr_label_score = torch.mul(attr_label_max, score)
         label_attr_sort_score = torch.topk(attr_label_score, 1, dim=2)
 
-        # relation_score = cos_attr[label_attr_sort_score[1], sort_score]
-        #
-        # relation_score_top = torch.topk(relation_score, 6, dim=2)
-        # attr_tmp_index = relation_score_top[1]
-        # attr_index = torch.gather(sort_score, dim=2, index=attr_tmp_index)
-        # attr_index = attr_index[:,:,1:]
-        # rela = relation_score_top[0][:,:,1:]
-        # # attr_index = sort_score[attr_tmp_index]
-        #
-        # a = attr[attr_index]
-        # # attr_index = sort_score[attr_tmp_index]
-        #
-        # #        a = attr[attr_index]
-        # attr_sim = torch.sum(torch.mul(a, rela.unsqueeze(dim=3).expand_as(a)), dim=2)
+        relation_score = cos_attr[label_attr_sort_score[1], sort_score]
+
+        relation_score_top = torch.topk(relation_score, 5, dim=2)
+        attr_tmp_index = relation_score_top[1]
+        attr_index = torch.gather(sort_score, dim=2, index=attr_tmp_index)
+        attr_tmp_index = relation_score_top[1]
+        attr_index = torch.gather(sort_score, dim=2, index=attr_tmp_index)
+
+        # attr_index = sort_score[attr_tmp_index]
+
+        a = attr[attr_index]
+        # attr_index = sort_score[attr_tmp_index]
+
+        #        a = attr[attr_index]
+        attr_sim = torch.sum(torch.mul(a, relation_score_top[0].unsqueeze(dim=3).expand_as(a)), dim=2)
 
         attr_decoder = attr[label_attr_sort_score[1].squeeze()]
         # attr_decoder = attr[label_attr_sort_score[1].squeeze()]
@@ -323,25 +341,21 @@ class MaskedAutoencoderViT(nn.Module):
 
         # mask = sort_score_content<=0.01
         # attr_decoder = torch.where(mask,x_ori.float(),attr_decoder.float())
-        return attr_decoder
+        return attr_decoder,label_attr_sort_score[1]
 
     def forward_loss(self, imgs, pred,att_pred,mask, labels, cls_out, hash_out, cls_out_attr, hash_out_attr):
         """
         imgs: [N, 3, H, W]
         pred: [N, L, p*p*3]
-        mask: [N, L], 0 is keep, 1 is remove,
+        mask: [N, L], 0 is keep, 1 is remove, 
         """
         criterion = My_Loss(self.num_classes, self.hash_length, mixup_fn=None, smoothing=0,
-                            alph=self.alpha, beta=1, gamm=1.0,unseen_class=self.unseen_classes)
+                            alph=self.alpha, beta=1e-1, gamm=1,unseen_class=self.unseen_classes)
         hash_loss, quanti_loss, cls_loss, loss1 = criterion(hash_out, cls_out,labels)
         _, _, _, loss1_attr = criterion(hash_out_attr,cls_out_attr,labels)
-        # hash1 = torch.sign(hash_out_attr)
-        # hash2 = torch.sign(hash_out)
-        # loss3 =(hash_out - hash_out_attr).pow(2).mean()
-        loss3 = torch.abs(torch.sum(hash_out_attr - hash_out)/ hash_out.shape[0])
-        # loss3_ = torch.abs(torch.sum(hash_out_attr - hash_out)).mean()
-        # loss3 = torch.abs(0.5*torch.sum(hash_out_attr - hash_out) / hash_out.shape[0])
-        # loss3=0.0
+        hash1 = torch.sign(hash_out_attr)
+        hash2 = torch.sign(hash_out)
+        loss3 = torch.abs(0.5*torch.sum(hash1 - hash2) / hash1.shape[0])
         # loss3 = 0.1*self.dcl(hash_out,hash_out_attr,labels)
         target = self.patchify(imgs)
         if self.norm_pix_loss:
@@ -366,14 +380,14 @@ class MaskedAutoencoderViT(nn.Module):
 
     def forward(self,labels, lab_att,imgs, mode,mask_ratio=0.25):
         attr = self.embed_attr(self.V.float())
-        latent, mask, ids_restore, cls_out, hash_out, latent_attr, cls_out_attr, hash_out_attr = self.forward_encoder(imgs, attr, lab_att, labels, mode,mask_ratio)
-        # self.unpatchify(latent)
+        latent, mask, ids_restore,attr_in, cls_out, hash_out, latent_attr, cls_out_attr, hash_out_attr = self.forward_encoder(imgs, attr, lab_att, labels, mode,mask_ratio)
         # latent, mask, ids_restore,cls_out, hash_out = self.forward_encoder(imgs, mask_ratio)
-        if self.training == False:
-            return 0.0, None, mask, hash_out, cls_out
+        # if mode!="train":
+        #     return 0.0, None, mask, hash_out, cls_out
         # att_latent = self.forward_attribute(latent,lab_att,labels)
         att_pred = self.forward_decoder(latent_attr, ids_restore)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
+        return att_pred, pred, mask, hash_out, cls_out,attr_in
         loss = self.forward_loss(imgs, pred,att_pred, mask, labels,cls_out, hash_out, cls_out_attr, hash_out_attr)
 
         return loss, pred, mask, hash_out, cls_out

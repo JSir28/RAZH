@@ -338,7 +338,7 @@ class MaskedAutoencoderViT(nn.Module):
         # hash1 = torch.sign(hash_out_attr)
         # hash2 = torch.sign(hash_out)
         # loss3 =(hash_out - hash_out_attr).pow(2).mean()
-        loss3 = torch.abs(torch.sum(hash_out_attr - hash_out)/ hash_out.shape[0])
+        # loss3 = torch.abs(torch.sum(hash_out_attr - hash_out)/ hash_out.shape[0])
         # loss3_ = torch.abs(torch.sum(hash_out_attr - hash_out)).mean()
         # loss3 = torch.abs(0.5*torch.sum(hash_out_attr - hash_out) / hash_out.shape[0])
         # loss3=0.0
@@ -360,20 +360,20 @@ class MaskedAutoencoderViT(nn.Module):
         loss2 = (loss2 * mask).sum() / mask.sum()  # mean loss on removed patches
 
 
-        rec_loss = self.gamm*(loss+loss2+loss3)
+        rec_loss = self.gamm*(loss+loss2)
         # loss3 = loss =loss2 =0.0
-        return rec_loss+ loss1+loss1_attr
+        return rec_loss+loss1+loss1_attr
 
     def forward(self,labels, lab_att,imgs, mode,mask_ratio=0.25):
         attr = self.embed_attr(self.V.float())
         latent, mask, ids_restore, cls_out, hash_out, latent_attr, cls_out_attr, hash_out_attr = self.forward_encoder(imgs, attr, lab_att, labels, mode,mask_ratio)
-        # self.unpatchify(latent)
         # latent, mask, ids_restore,cls_out, hash_out = self.forward_encoder(imgs, mask_ratio)
         if self.training == False:
             return 0.0, None, mask, hash_out, cls_out
         # att_latent = self.forward_attribute(latent,lab_att,labels)
         att_pred = self.forward_decoder(latent_attr, ids_restore)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
+   
         loss = self.forward_loss(imgs, pred,att_pred, mask, labels,cls_out, hash_out, cls_out_attr, hash_out_attr)
 
         return loss, pred, mask, hash_out, cls_out

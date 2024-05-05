@@ -11,6 +11,7 @@
 import pickle
 from functools import partial
 
+import numpy
 import torch
 import torch.nn as nn
 
@@ -24,7 +25,7 @@ class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
 
-    def __init__(self, img_size=224, patch_size=16, in_chans=3,
+    def __init__(self, img_size=192, patch_size=16, in_chans=3,
                  embed_dim=768, depth=24, num_heads=16, hash_length=128,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16, w2v_dim=300,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, num_classes=50, attr=None,alpha=1e-1,gamm=1e-1,
@@ -88,7 +89,7 @@ class MaskedAutoencoderViT(nn.Module):
         pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed .num_patches**.5), cls_token=True)
         self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
@@ -118,6 +119,7 @@ class MaskedAutoencoderViT(nn.Module):
         x: (N, L, patch_size**2 *3)
         """
         p = self.patch_embed.patch_size[0]
+        # p = 32
         assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
 
         h = w = imgs.shape[2] // p
@@ -134,7 +136,7 @@ class MaskedAutoencoderViT(nn.Module):
         p = self.patch_embed.patch_size[0]
         h = w = int(x.shape[1]**.5)
         assert h * w == x.shape[1]
-        
+
         x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
         x = torch.einsum('nhwpqc->nchpwq', x)
         imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
@@ -293,7 +295,7 @@ class MaskedAutoencoderViT(nn.Module):
         # print(la)
         # sort_score_content = torch.topk(score, 1, dim=2)[0]
 
-        attr_label = lab_att[labels]
+        attr_label = lab_att
         # index = torch.nonzero(attr_label==1)
         # print(index)
         attr_label_max = attr_label.detach().unsqueeze(dim=1).repeat(1, score.shape[1], 1)
@@ -367,7 +369,6 @@ class MaskedAutoencoderViT(nn.Module):
     def forward(self,labels, lab_att,imgs, mode,mask_ratio=0.25):
         attr = self.embed_attr(self.V.float())
         latent, mask, ids_restore, cls_out, hash_out, latent_attr, cls_out_attr, hash_out_attr = self.forward_encoder(imgs, attr, lab_att, labels, mode,mask_ratio)
-        # self.unpatchify(latent)
         # latent, mask, ids_restore,cls_out, hash_out = self.forward_encoder(imgs, mask_ratio)
         if self.training == False:
             return 0.0, None, mask, hash_out, cls_out
@@ -380,8 +381,9 @@ class MaskedAutoencoderViT(nn.Module):
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):
-    with open('/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/mae_jy_2_backup/word2vec/AWA2_attribute.pkl', 'rb') as f:
-        w2v_att = torch.tensor(pickle.load(f))
+
+    w2v_att = torch.tensor(numpy.load('/mnt/f88fa63a-2225-40fb-9afa-99a7c125ae28/jy/mae_jy_2_backup/word2vec/awa2_label_word2vec_300d.npy'))
+
     model = MaskedAutoencoderViT(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,

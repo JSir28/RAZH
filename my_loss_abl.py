@@ -64,21 +64,12 @@ class My_Loss(nn.Module):
         # return loss.sum()
         return loss.sum() / out.shape[0] / out.shape[0]
 
-    def compute_loss_Self_Calibrate(self, cls_out):
-        S_pp = cls_out
-        Prob_all = F.softmax(S_pp, dim=-1)
-        Prob_unseen = Prob_all[:, self.unseenclass]
-        assert Prob_unseen.size(1) == len(self.unseenclass)
-        mass_unseen = torch.sum(Prob_unseen, dim=1)
-        loss_pmp = -torch.log(torch.mean(mass_unseen))
-        return loss_pmp
 
     def forward(self, hash_out, cls_out, target):
         cls_loss = self.classify_loss_fun(cls_out.cuda(), target.cuda())
         hash_loss = self.hash_loss(hash_out.cuda(), target.cuda())
         quanti_loss = 0.0
-        cla_loss = self.compute_loss_Self_Calibrate(cls_out=cls_out)
-        loss = (cls_loss+cla_loss)+self.alph*hash_loss
+        loss = (cls_loss)+self.alph*hash_loss
         return hash_loss, quanti_loss, cls_loss, loss
 
 
